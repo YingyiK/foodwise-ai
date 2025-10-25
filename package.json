@@ -1,0 +1,35 @@
+{
+  "name": "foodwise-ai",
+  "version": "1.0.0",
+  "description": "End-to-end intelligent food decision platform with multi-agent AI systems",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd backend && npm run dev",
+    "client": "cd frontend && npm start",
+    "build": "cd frontend && npm run build",
+    "deploy": "cd backend && npm run deploy",
+    "test": "jest",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx"
+  },
+  "keywords": [
+    "ai",
+    "food",
+    "recommendation",
+    "health",
+    "yelp",
+    "grocery",
+    "multi-agent"
+  ],
+  "author": "FoodWise AI Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0"
+  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ]
+}

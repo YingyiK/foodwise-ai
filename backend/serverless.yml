@@ -1,0 +1,247 @@
+service: foodwise-ai-backend
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-west-2'}
+  
+  environment:
+    NODE_ENV: ${self:provider.stage}
+    ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY}
+    YELP_API_KEY: ${env:YELP_API_KEY}
+    GOOGLE_MAPS_API_KEY: ${env:GOOGLE_MAPS_API_KEY}
+    MONGODB_URI: ${env:MONGODB_URI}
+    JWT_SECRET: ${env:JWT_SECRET}
+    
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:DeleteObject
+          Resource: 
+            - arn:aws:s3:::foodwise-data-${self:provider.stage}/*
+        - Effect: Allow
+          Action:
+            - lambda:InvokeFunction
+          Resource: "*"
+
+functions:
+  # Main API Gateway handler
+  api:
+    handler: src/handlers/api.handler
+    events:
+      - http:
+          path: /{proxy+}
+          method: ANY
+          cors: true
+    timeout: 30
+    memorySize: 1024
+
+  # Food recommendation handler
+  foodRecommendation:
+    handler: src/handlers/foodRecommendation.handler
+    events:
+      - http:
+          path: /api/food/recommend
+          method: POST
+          cors: true
+    timeout: 60
+    memorySize: 2048
+
+  # Restaurant search handler
+  restaurantSearch:
+    handler: src/handlers/restaurantSearch.handler
+    events:
+      - http:
+          path: /api/restaurant/search
+          method: GET
+          cors: true
+    timeout: 30
+    memorySize: 1024
+
+  # Grocery shopping handler
+  groceryShopping:
+    handler: src/handlers/groceryShopping.handler
+    events:
+      - http:
+          path: /api/grocery/shopping-list
+          method: POST
+          cors: true
+    timeout: 45
+    memorySize: 1536
+
+  # User profile handler
+  userProfile:
+    handler: src/handlers/userProfile.handler
+    events:
+      - http:
+          path: /api/user/{proxy+}
+          method: ANY
+          cors: true
+    timeout: 30
+    memorySize: 1024
+
+  # Agent status handler
+  agentStatus:
+    handler: src/handlers/agentStatus.handler
+    events:
+      - http:
+          path: /api/agents/{proxy+}
+          method: ANY
+          cors: true
+    timeout: 30
+    memorySize: 1024
+
+  # Scheduled tasks
+  dailyDataSync:
+    handler: src/handlers/scheduledTasks.dailyDataSync
+    events:
+      - schedule: cron(0 2 * * ? *)  # Daily at 2 AM UTC
+    timeout: 300
+    memorySize: 1024
+
+  weeklyModelUpdate:
+    handler: src/handlers/scheduledTasks.weeklyModelUpdate
+    events:
+      - schedule: cron(0 3 ? * SUN *)  # Weekly on Sunday at 3 AM UTC
+    timeout: 600
+    memorySize: 2048
+
+resources:
+  Resources:
+    # S3 Bucket for data storage
+    FoodWiseDataBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: foodwise-data-${self:provider.stage}
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+        VersioningConfiguration:
+          Status: Enabled
+        LifecycleConfiguration:
+          Rules:
+            - Id: DeleteOldVersions
+              Status: Enabled
+              NoncurrentVersionExpirationInDays: 30
+
+    # DynamoDB table for user data
+    UserDataTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: foodwise-users-${self:provider.stage}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: createdAt
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: CreatedAtIndex
+            KeySchema:
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    # DynamoDB table for food data
+    FoodDataTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: foodwise-foods-${self:provider.stage}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: foodId
+            AttributeType: S
+          - AttributeName: category
+            AttributeType: S
+        KeySchema:
+          - AttributeName: foodId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: CategoryIndex
+            KeySchema:
+              - AttributeName: category
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+    # API Gateway
+    ApiGateway:
+      Type: AWS::ApiGateway::RestApi
+      Properties:
+        Name: foodwise-api-${self:provider.stage}
+        Description: FoodWise AI API Gateway
+        EndpointConfiguration:
+          Types:
+            - REGIONAL
+
+    # CloudWatch Log Groups
+    ApiLogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: /aws/lambda/foodwise-api-${self:provider.stage}
+        RetentionInDays: 14
+
+    FoodRecommendationLogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: /aws/lambda/foodwise-food-recommendation-${self:provider.stage}
+        RetentionInDays: 14
+
+  Outputs:
+    ApiGatewayUrl:
+      Description: API Gateway URL
+      Value:
+        Fn::Join:
+          - ''
+          - - 'https://'
+            - Ref: ApiGateway
+            - '.execute-api.'
+            - ${self:provider.region}
+            - '.amazonaws.com/'
+            - ${self:provider.stage}
+
+    S3BucketName:
+      Description: S3 Bucket for data storage
+      Value:
+        Ref: FoodWiseDataBucket
+
+    UserTableName:
+      Description: DynamoDB table for user data
+      Value:
+        Ref: UserDataTable
+
+    FoodTableName:
+      Description: DynamoDB table for food data
+      Value:
+        Ref: FoodDataTable
+
+plugins:
+  - serverless-offline
+  - serverless-dotenv-plugin
+
+custom:
+  serverless-offline:
+    httpPort: 3001
+    host: 0.0.0.0
+
+package:
+  patterns:
+    - '!node_modules/.cache/**'
+    - '!tests/**'
+    - '!docs/**'
+    - '!.git/**'
+    - '!.env*'
+    - '!*.md'
